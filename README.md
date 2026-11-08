@@ -1,235 +1,333 @@
 
-# High-Performance In-Memory Datastore (C++ Redis Clone)
+# ⚡ High-Performance In-Memory Key-Value Store
 
-A lightweight, high-performance in-memory database built entirely from scratch in **C++14**. This project implements a custom non-blocking TCP server, a proprietary binary serialization protocol, and advanced data structures to achieve production-grade throughput with minimal latency.
+A Redis-inspired, high-performance in-memory database built from scratch using **C++14**.
 
----
+Designed to demonstrate advanced Data Structures, Algorithms, Operating Systems, Computer Networks, and memory management through a compact database engine.
 
-## Performance Benchmark
+## 🚀 Key Features
 
-Achieved **57,600+ Operations Per Second (OPS)** for concurrent `SET`/`GET` operations on a **single-threaded architecture** running on **Apple Silicon (bare-metal)**.
+- **Non-blocking TCP Server:** Single-threaded event loop using `poll()` to handle multiple client connections.
+- **Custom Hash Table:** Average O(1) key-value operations with incremental rehashing.
+- **AVL Tree:** Self-balancing AVL tree powering sorted-set operations.
+- **TTL Management:** Min-heap-based key expiration with lazy and active expiration.
+- **Memory Reclamation:** Background thread pool for deferred destruction of large sorted sets.
+- **Custom Binary Protocol:** Length-prefixed request/response protocol with pipelining support.
+- **Concurrent Connections:** Handles multiple connected clients without blocking on individual socket operations.
 
-> **Note:** Containerized deployment on macOS introduces a network proxy layer that slightly impacts throughput. Bare-metal execution reflects the true performance of the underlying C++ event-driven architecture.
+## 🏗️ System Architecture
 
----
-
-## Features
-
-- High-performance in-memory key-value datastore
-- Non-blocking TCP server using `poll()`
-- Custom binary serialization protocol
-- Custom hash table with **O(1)** progressive rehashing
-- AVL Tree implementation for Sorted Sets (`ZSET`)
-- TTL support using a Min-Heap
-- Asynchronous memory cleanup using a background thread pool
-- Optimized with `-O3` compiler optimizations
-- Docker support for instant deployment
-
----
-
-# Quick Start (Docker)
-
-Run the datastore instantly without installing a C++ compiler.
-
-```bash
-docker run -d -p 6379:6379 yashgupta/c-redis-datastore:v1.0
+```text
+             CLIENT APPLICATIONS
+                      |
+                      | TCP
+                      v
+             NON-BLOCKING SERVER
+                      |
+                      v
+                EVENT LOOP
+                 (poll)
+                      |
+                      v
+              COMMAND PARSER
+                      |
+                      v
+             COMMAND EXECUTION
+                      |
+          +-----------+-----------+
+          |           |           |
+          v           v           v
+      HASH TABLE   AVL TREE    TTL HEAP
+          |           |           |
+          v           v           v
+      KEY-VALUE    SORTED SET   EXPIRATION
+       STORAGE      STORAGE     MANAGER
+          |
+          v
+    MEMORY RECLAIMER
+     (Worker Pool)
 ```
 
-The server will start listening on:
+## 🧠 Core Data Structures & Complexity
 
-```
-localhost:6379
-```
+| Component | Data Structure | Complexity |
+|---|---|---|
+| Key-value storage | Custom Hash Table | Average O(1) |
+| Hash resizing | Incremental Rehashing | Amortized O(1) per migrated entry |
+| Sorted sets | AVL Tree | O(log N) |
+| Rank queries | Subtree Size Augmentation | O(log N) |
+| TTL scheduling | Min-Heap | O(log N) insertion |
+| Expiration lookup | Min-Heap | O(1) peek |
+| Memory cleanup | Background Worker Pool | Deferred processing |
 
----
+### 1. Incremental Rehashing
 
-# System Architecture
+Traditional hash-table resizing can cause noticeable pauses when a large number of entries must be migrated.
 
-The datastore is designed from scratch with performance as the primary objective, avoiding high-level abstractions wherever possible.
+This project implements incremental rehashing:
 
-## Non-blocking Event Loop
+- Maintains old and new hash tables during resizing.
+- Migrates a bounded amount of work per database operation.
+- Allows lookups and updates while migration is in progress.
+- Avoids a single large resize operation on the request path.
 
-- Built using POSIX `poll()`
-- Handles thousands of concurrent TCP connections
-- Eliminates expensive OS thread context switching
-- Single-threaded networking architecture
+### 2. AVL-Tree-Based Sorted Sets
 
----
+Each AVL node stores:
 
-## Custom Hash Table
+- Member name
+- Numeric score
+- Node height
+- Subtree size
+- Left and right child pointers
 
-Implemented entirely from scratch using chaining.
+Supported operations include insertion, deletion, score lookup, and rank-based range queries.
 
-### Progressive Rehashing
+### 3. TTL-Based Expiration
 
-Instead of rehashing the entire table at once (which causes latency spikes), the server migrates a fixed number of buckets (e.g., **128**) during each event loop iteration.
+A min-heap schedules key expiration.
 
-Benefits:
+- `PEXPIRE` assigns an expiration time.
+- `PTTL` returns remaining lifetime.
+- `PERSIST` removes expiration.
+- Expired keys are removed through lazy and active expiration.
 
-- Constant latency
-- No server freezing
-- O(1) amortized resizing
+### 4. Deferred Memory Reclamation
 
----
+Large detached sorted sets can be scheduled for background destruction.
 
-## AVL Trees (Sorted Sets)
+This reduces expensive object destruction on the main request-processing path.
 
-Sorted Sets (`ZSET`) are backed by a custom AVL Tree implementation.
+## 📋 Supported Commands
 
-Provides:
+The database currently supports 16 commands.
 
-- O(log N) insertion
-- O(log N) deletion
-- O(log N) lookup
-- Efficient range queries
+### Key-Value Operations
 
----
+| Command | Description |
+|---|---|
+| `PING` | Check server connectivity |
+| `SET key value` | Insert or update a key |
+| `GET key` | Retrieve a value |
+| `DEL key` | Delete a key |
+| `EXISTS key` | Check key existence |
+| `DBSIZE` | Return the number of keys |
+| `INCR key` | Increment an integer value |
+| `KEYS` | Return all keys |
 
-## Min Heap (TTL Management)
+### TTL Operations
 
-Expiration times are maintained using a custom Min-Heap.
+| Command | Description |
+|---|---|
+| `PEXPIRE key milliseconds` | Set expiration |
+| `PTTL key` | Get remaining TTL |
+| `PERSIST key` | Remove expiration |
 
-Advantages:
+### Sorted Set Operations
 
-- O(1) access to the next key to expire
-- Efficient TTL cleanup
-- Low memory overhead
+| Command | Description |
+|---|---|
+| `ZADD key score member` | Add or update a member |
+| `ZREM key member` | Remove a member |
+| `ZSCORE key member` | Get member score |
+| `ZCARD key` | Count sorted-set members |
+| `ZQUERY key score member offset limit` | Query sorted-set elements |
 
----
+## 💻 Tech Stack
 
-## Asynchronous Deallocation
+- Language: C++14
+- Networking: TCP Sockets
+- I/O Multiplexing: `poll()`
+- Data Structures: Hash Table, AVL Tree, Min-Heap
+- Concurrency: POSIX Threads
+- Build System: CMake / Make
+- Testing: Python Integration Tests
 
-Destroying large AVL trees can block the main event loop.
+## ⚙️ Installation & Setup
 
-To avoid latency spikes, a dedicated thread pool performs background memory cleanup.
+### Requirements
 
-Benefits:
-
-- Non-blocking deletes
-- Smooth request latency
-- Faster server responsiveness
-
----
-
-# 🛠️ Build From Source
-
-## Prerequisites
-
-- C++14 compatible compiler (`clang` or `g++`)
 - macOS or Linux
-- POSIX-compatible environment
+- C++14-compatible compiler
+- CMake 3.12+
+- Python 3 (for integration tests)
+- POSIX threads
 
----
+No external Redis server or third-party C++ Redis client is required.
 
-## Clone Repository
-
-```bash
-git clone https://github.com/yashgupta/c-redis-datastore.git
-
-cd c-redis-datastore/redis/14
-```
-
----
-
-## Compile
+### Clone the Repository
 
 ```bash
-clang++ -O3 -std=c++14 -pthread \
-14_server.cpp \
-hashtable.cpp \
-zset.cpp \
-avl.cpp \
-heap.cpp \
-thread_pool.cpp \
--o server
+git clone https://github.com/viv007-cyber/Project-Redis.git
+
+cd Project-Redis
 ```
 
----
-
-## Run
+### Build Using CMake
 
 ```bash
-./server
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+cmake --build build -j
 ```
 
-The datastore will start listening on port **6379**.
-
----
-
-# Benchmarking
-
-Since this project uses a **custom binary protocol**, standard tools like `redis-benchmark` cannot be used.
-
-A dedicated benchmark tool is included.
-
-## Compile
+### Alternative: Build Using Make
 
 ```bash
-clang++ -O3 -std=c++14 benchmark.cpp -o custom_bench
+make
 ```
 
-## Run
+## ▶️ Running the Server
+
+Start the server on port 6379:
 
 ```bash
-./custom_bench
+./build/kvstore_server 6379
 ```
 
-Make sure the server is already running before executing the benchmark.
+If using Make:
 
----
-
-# Benchmark Results
-
-| Metric | Value |
-|----------|-------|
-| Architecture | Single-threaded |
-| Protocol | Custom Binary |
-| Event Loop | `poll()` |
-| Operations | Concurrent `SET` / `GET` |
-| Throughput | **57,600+ OPS** |
-| Platform | Apple Silicon (Bare Metal) |
-
----
-
-# 🏗️ Project Structure
-
-```
-redis/
-└── 14/
-    ├── 14_server.cpp
-    ├── benchmark.cpp
-    ├── hashtable.cpp
-    ├── heap.cpp
-    ├── avl.cpp
-    ├── zset.cpp
-    ├── thread_pool.cpp
-    └── ...
+```bash
+./kvstore_server 6379
 ```
 
----
+The server accepts an optional port argument. The default port is 6379.
 
-# Future Improvements
+## 🧪 Testing
 
-- RESP protocol compatibility
-- Persistence (AOF/RDB)
-- Replication
-- Multi-threaded networking
-- Cluster mode
-- Pub/Sub support
-- Transactions
-- Lua scripting
-- LRU/LFU eviction policies
+Run the integration tests using CMake:
 
----
+```bash
+ctest --test-dir build --output-on-failure
+```
 
-# 📄 License
+Or using Make:
 
-This project is released under the **MIT License**.
+```bash
+make test
+```
 
----
+The integration tests cover:
 
-# 👨‍💻 Author
+- Basic key-value operations
+- Integer increments
+- TTL expiration
+- Sorted-set operations
+- Multiple client connections
+- Hash-table growth and rehashing
 
-** Vivaan Jain and Yash Gupta**
+## 📊 Benchmarking
 
-````
+Start the server in Terminal 1:
+
+```bash
+./build/kvstore_server 6379
+```
+
+Run the benchmark in Terminal 2:
+
+```bash
+./build/kvstore_benchmark 6379
+```
+
+The benchmark executes 100,000 sequential SET requests over one TCP connection.
+
+Record the following when reporting results:
+
+- CPU and RAM configuration
+- Compiler and compiler version
+- Build configuration
+- Number of requests
+- Throughput in operations per second
+
+Benchmark results are machine-dependent and should not be treated as a direct Redis comparison.
+
+## 📁 Project Structure
+
+```text
+Project-Redis/
+│
+├── 14/
+│   ├── 14_server.cpp
+│   ├── hashtable.cpp
+│   ├── hashtable.h
+│   ├── avl.cpp
+│   ├── avl.h
+│   ├── zset.cpp
+│   ├── zset.h
+│   ├── heap.cpp
+│   ├── heap.h
+│   ├── thread_pool.cpp
+│   ├── thread_pool.h
+│   ├── common.h
+│   ├── list.h
+│   └── benchmark.cpp
+│
+├── tests/
+│   └── integration_test.py
+│
+├── CMakeLists.txt
+├── Makefile
+├── Dockerfile
+└── README.md
+```
+
+## 🎯 Engineering Concepts Demonstrated
+
+This project demonstrates practical implementation of:
+
+**Data Structures & Algorithms**
+- Custom hash tables
+- Incremental rehashing
+- AVL rotations and balancing
+- Min-heaps
+- Rank-based tree traversal
+
+**Operating Systems**
+- Non-blocking I/O
+- Event-driven architecture
+- POSIX threads
+- Deferred memory reclamation
+- Resource management
+
+**Computer Networks**
+- TCP client-server communication
+- Socket programming
+- Binary serialization
+- Request pipelining
+- Multiple client connections
+
+**System Design**
+- In-memory storage architecture
+- Command execution engine
+- TTL scheduling
+- Background resource cleanup
+
+## ⚠️ Current Limitations
+
+This is an educational systems-programming project, not a production replacement for Redis.
+
+- No AOF/RDB persistence or crash recovery.
+- No replication or clustering.
+- No authentication or TLS.
+- Custom protocol; not RESP-compatible.
+- Command execution is single-threaded.
+- `KEYS` scans the complete keyspace.
+- Benchmark currently uses one sequential client connection.
+
+## 🔮 Future Improvements
+
+- RESP protocol compatibility.
+- Snapshot-based persistence.
+- Append-only file logging.
+- LRU/LFU eviction policies.
+- Improved multi-client load testing.
+- Latency measurement (p50, p95, p99).
+- Memory profiling and allocator optimization.
+
+## 🎓 Learning Outcomes
+
+The primary objective is to understand how high-performance database systems work internally by implementing their core mechanisms rather than relying on existing database libraries.
+
+**Built with C++14 | Data Structures | Algorithms | Operating Systems | Computer Networks**
+
